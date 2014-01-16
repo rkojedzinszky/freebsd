@@ -1228,8 +1228,10 @@ zfs_domount(vfs_t *vfsp, char *osname)
 	VERIFY(VFS_ROOT(vfsp, LK_EXCLUSIVE, &vp) == 0);
 	VOP_UNLOCK(vp, 0);
 
+#if 0
 	if (!zfsvfs->z_issnap)
 		zfsctl_create(zfsvfs);
+#endif
 out:
 	if (error) {
 		dmu_objset_disown(zfsvfs->z_os, zfsvfs);
@@ -1961,8 +1963,10 @@ zfs_umount(vfs_t *vfsp, int fflag)
 				return (EBUSY);
 			ASSERT(zfsvfs->z_ctldir->v_count == 1);
 		}
+#if 0
 		zfsctl_destroy(zfsvfs);
 		ASSERT(zfsvfs->z_ctldir == NULL);
+#endif
 	}
 
 	if (fflag & MS_FORCE) {
@@ -1981,10 +1985,12 @@ zfs_umount(vfs_t *vfsp, int fflag)
 	 */
 	ret = vflush(vfsp, 1, (fflag & MS_FORCE) ? FORCECLOSE : 0, td);
 	if (ret != 0) {
+#if 0
 		if (!zfsvfs->z_issnap) {
 			zfsctl_create(zfsvfs);
 			ASSERT(zfsvfs->z_ctldir != NULL);
 		}
+#endif
 		return (ret);
 	}
 
@@ -2035,8 +2041,10 @@ zfs_umount(vfs_t *vfsp, int fflag)
 	/*
 	 * We can now safely destroy the '.zfs' directory node.
 	 */
+#if 0
 	if (zfsvfs->z_ctldir != NULL)
 		zfsctl_destroy(zfsvfs);
+#endif
 	if (zfsvfs->z_issnap) {
 		vnode_t *svp = vfsp->mnt_vnodecovered;
 
