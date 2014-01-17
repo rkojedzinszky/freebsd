@@ -6,7 +6,6 @@
 
 # PROVIDE: statd
 # REQUIRE: nfsclient nfsd rpcbind
-# BEFORE:  DAEMON
 # KEYWORD: nojail shutdown
 
 . /etc/rc.subr
