@@ -1023,6 +1023,15 @@ static struct da_quirk_entry da_quirk_table[] =
 	},
 	{
 		/*
+		 * Intel S3700 Series SSDs
+		 * 4k optimised & trim only works in 4k requests + 4k aligned
+		 * cache flush not needed, as power-loss-protected
+		 */
+		{ T_DIRECT, SIP_MEDIA_FIXED, "ATA", "INTEL SSDSC2BA*", "*" },
+		/*quirks*/DA_Q_4K | DA_Q_NO_SYNC_CACHE
+	},
+	{
+		/*
 		 * Kingston E100 Series SSDs
 		 * 4k optimised & trim only works in 4k requests + 4k aligned
 		 */
