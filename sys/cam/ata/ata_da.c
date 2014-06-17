@@ -1841,6 +1841,12 @@ out:
 			}
 		}
 
+		if (ataio->cmd.features == ATA_SF_ENAB_WCACHE) {
+			softc->disk->d_flags |= DISKFLAG_CANFLUSHCACHE;
+		} else {
+			softc->disk->d_flags &= ~DISKFLAG_CANFLUSHCACHE;
+		}
+
 		softc->state = ADA_STATE_NORMAL;
 		/*
 		 * Since our peripheral may be invalidated by an error
