@@ -344,6 +344,7 @@ typedef struct arc_stats {
 	kstat_named_t arcstat_l2_evict_lock_retry;
 	kstat_named_t arcstat_l2_evict_reading;
 	kstat_named_t arcstat_l2_free_on_write;
+	kstat_named_t arcstat_l2_cdata_free_on_write;
 	kstat_named_t arcstat_l2_abort_lowmem;
 	kstat_named_t arcstat_l2_cksum_bad;
 	kstat_named_t arcstat_l2_io_error;
@@ -421,6 +422,7 @@ static arc_stats_t arc_stats = {
 	{ "l2_evict_lock_retry",	KSTAT_DATA_UINT64 },
 	{ "l2_evict_reading",		KSTAT_DATA_UINT64 },
 	{ "l2_free_on_write",		KSTAT_DATA_UINT64 },
+	{ "l2_cdata_free_on_write",	KSTAT_DATA_UINT64 },
 	{ "l2_abort_lowmem",		KSTAT_DATA_UINT64 },
 	{ "l2_cksum_bad",		KSTAT_DATA_UINT64 },
 	{ "l2_io_error",		KSTAT_DATA_UINT64 },
@@ -1653,6 +1655,33 @@ arc_buf_data_free(arc_buf_t *buf, void (*free_func)(void *, size_t))
 	}
 }
 
+static void
+arc_buf_l2_cdata_free(arc_buf_hdr_t *hdr)
+{
+	l2arc_buf_hdr_t *l2hdr = hdr->b_l2hdr;
+
+	ASSERT(MUTEX_HELD(&l2arc_buflist_mtx));
+
+	if (l2hdr->b_tmp_cdata ==  NULL ||
+	    l2hdr->b_compress != ZIO_COMPRESS_LZ4)
+		return;
+
+	if (HDR_L2_WRITING(hdr)) {
+		l2arc_data_free_t *df;
+		df = kmem_alloc(sizeof (l2arc_data_free_t), KM_SLEEP);
+		df->l2df_data = l2hdr->b_tmp_cdata;
+		df->l2df_size = hdr->b_size;
+		df->l2df_func = zio_data_buf_free;
+		mutex_enter(&l2arc_free_on_write_mtx);
+		list_insert_head(l2arc_free_on_write, df);
+		mutex_exit(&l2arc_free_on_write_mtx);
+		ARCSTAT_BUMP(arcstat_l2_cdata_free_on_write);
+	} else {
+		zio_data_buf_free(l2hdr->b_tmp_cdata, hdr->b_size);
+	}
+	l2hdr->b_tmp_cdata = NULL;
+}
+
 /*
  * Free up buf->b_data and if 'remove' is set, then pull the
  * arc_buf_t off of the the arc_buf_hdr_t's list and free it.
@@ -1756,6 +1785,13 @@ arc_hdr_destroy(arc_buf_hdr_t *hdr)
 			trim_map_free(l2hdr->b_dev->l2ad_vdev, l2hdr->b_daddr,
 			    hdr->b_size, 0);
 			list_remove(l2hdr->b_dev->l2ad_buflist, hdr);
+			arc_buf_l2_cdata_free(hdr);
+			/*
+			 * We are destroying l2hdr, so ensure that
+			 * its compressed buffer, if any, is not leaked.
+			 */
+			ASSERT(l2hdr->b_compress == ZIO_COMPRESS_OFF ||
+			    l2hdr->b_tmp_cdata == NULL);
 			ARCSTAT_INCR(arcstat_l2_size, -hdr->b_size);
 			ARCSTAT_INCR(arcstat_l2_asize, -l2hdr->b_asize);
 			vdev_space_update(l2hdr->b_dev->l2ad_vdev,
@@ -3615,6 +3651,7 @@ arc_release(arc_buf_t *buf, void *tag)
 	l2hdr = hdr->b_l2hdr;
 	if (l2hdr) {
 		mutex_enter(&l2arc_buflist_mtx);
+		arc_buf_l2_cdata_free(hdr);
 		hdr->b_l2hdr = NULL;
 		list_remove(l2hdr->b_dev->l2ad_buflist, hdr);
 	}
@@ -3706,6 +3743,12 @@ arc_release(arc_buf_t *buf, void *tag)
 		    -l2hdr->b_asize, 0, 0);
 		trim_map_free(l2hdr->b_dev->l2ad_vdev, l2hdr->b_daddr,
 		    hdr->b_size, 0);
+		/*
+		 * We are destroying l2hdr, so ensure that
+		 * its compressed buffer, if any, is not leaked.
+		 */
+		ASSERT(l2hdr->b_compress == ZIO_COMPRESS_OFF ||
+		    l2hdr->b_tmp_cdata == NULL);
 		kmem_free(l2hdr, sizeof (l2arc_buf_hdr_t));
 		ARCSTAT_INCR(arcstat_l2_size, -buf_size);
 		mutex_exit(&l2arc_buflist_mtx);
@@ -4646,6 +4689,12 @@ l2arc_write_done(zio_t *zio)
 			ab->b_l2hdr = NULL;
 			trim_map_free(abl2->b_dev->l2ad_vdev, abl2->b_daddr,
 			    ab->b_size, 0);
+			/*
+			 * We are destroying l2hdr, so ensure that
+			 * its compressed buffer, if any, is not leaked.
+			 */
+			ASSERT(abl2->b_compress == ZIO_COMPRESS_OFF ||
+			    abl2->b_tmp_cdata == NULL);
 			kmem_free(abl2, sizeof (l2arc_buf_hdr_t));
 			ARCSTAT_INCR(arcstat_l2_size, -ab->b_size);
 		}
@@ -4905,6 +4954,12 @@ top:
 				ARCSTAT_INCR(arcstat_l2_asize, -abl2->b_asize);
 				bytes_evicted += abl2->b_asize;
 				ab->b_l2hdr = NULL;
+				/*
+				 * We are destroying l2hdr, so ensure that
+				 * its compressed buffer, if any, is not leaked.
+				 */
+				ASSERT(abl2->b_compress == ZIO_COMPRESS_OFF ||
+				    abl2->b_tmp_cdata == NULL);
 				kmem_free(abl2, sizeof (l2arc_buf_hdr_t));
 				ARCSTAT_INCR(arcstat_l2_size, -ab->b_size);
 			}
@@ -5333,6 +5388,7 @@ l2arc_release_cdata_buf(arc_buf_hdr_t *ab)
 {
 	l2arc_buf_hdr_t *l2hdr = ab->b_l2hdr;
 
+	ASSERT(L2ARC_IS_VALID_COMPRESS(l2hdr->b_compress));
 	if (l2hdr->b_compress == ZIO_COMPRESS_LZ4) {
 		/*
 		 * If the data was compressed, then we've allocated a
@@ -5340,8 +5396,10 @@ l2arc_release_cdata_buf(arc_buf_hdr_t *ab)
 		 */
 		ASSERT(l2hdr->b_tmp_cdata != NULL);
 		zio_data_buf_free(l2hdr->b_tmp_cdata, ab->b_size);
+		l2hdr->b_tmp_cdata = NULL;
+	} else {
+		ASSERT(l2hdr->b_tmp_cdata == NULL);
 	}
-	l2hdr->b_tmp_cdata = NULL;
 }
 
 /*
