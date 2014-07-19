@@ -2483,16 +2483,11 @@ arc_shrink(void)
 		arc_adjust();
 }
 
-static int needfree = 0;
-
 static int
 arc_reclaim_needed(void)
 {
 
 #ifdef _KERNEL
-
-	if (needfree)
-		return (1);
 
 	/*
 	 * Cooperate with pagedaemon when it's time for it to scan
@@ -2502,6 +2497,9 @@ arc_reclaim_needed(void)
 		return (1);
 
 #ifdef sun
+	if (needfree)
+		return (1);
+
 	/*
 	 * take 'desfree' extra pages, so we reclaim sooner, rather than later
 	 */
@@ -2640,15 +2638,6 @@ arc_reclaim_thread(void *dummy __unused)
 			/* reset the growth delay for every reclaim */
 			growtime = ddi_get_lbolt() + (arc_grow_retry * hz);
 
-			if (needfree && last_reclaim == ARC_RECLAIM_CONS) {
-				/*
-				 * If needfree is TRUE our vm_lowmem hook
-				 * was called and in that case we must free some
-				 * memory, so switch to aggressive mode.
-				 */
-				arc_no_grow = TRUE;
-				last_reclaim = ARC_RECLAIM_AGGR;
-			}
 			arc_kmem_reap_now(last_reclaim);
 			arc_warm = B_TRUE;
 
@@ -2660,13 +2649,6 @@ arc_reclaim_thread(void *dummy __unused)
 
 		if (arc_eviction_list != NULL)
 			arc_do_user_evicts();
-
-#ifdef _KERNEL
-		if (needfree) {
-			needfree = 0;
-			wakeup(&needfree);
-		}
-#endif
 
 		/* block until needed, or one second, whichever is shorter */
 		CALLB_CPR_SAFE_BEGIN(&cpr);
@@ -4035,34 +4017,6 @@ arc_tempreserve_space(uint64_t reserve, uint64_t txg)
 	return (0);
 }
 
-static kmutex_t arc_lowmem_lock;
-#ifdef _KERNEL
-static eventhandler_tag arc_event_lowmem = NULL;
-
-static void
-arc_lowmem(void *arg __unused, int howto __unused)
-{
-
-	/* Serialize access via arc_lowmem_lock. */
-	mutex_enter(&arc_lowmem_lock);
-	mutex_enter(&arc_reclaim_thr_lock);
-	needfree = 1;
-	cv_signal(&arc_reclaim_thr_cv);
-
-	/*
-	 * It is unsafe to block here in arbitrary threads, because we can come
-	 * here from ARC itself and may hold ARC locks and thus risk a deadlock
-	 * with ARC reclaim thread.
-	 */
-	if (curproc == pageproc) {
-		while (needfree)
-			msleep(&needfree, &arc_reclaim_thr_lock, 0, "zfs:lowmem", 0);
-	}
-	mutex_exit(&arc_reclaim_thr_lock);
-	mutex_exit(&arc_lowmem_lock);
-}
-#endif
-
 void
 arc_init(void)
 {
@@ -4070,7 +4024,6 @@ arc_init(void)
 
 	mutex_init(&arc_reclaim_thr_lock, NULL, MUTEX_DEFAULT, NULL);
 	cv_init(&arc_reclaim_thr_cv, NULL, CV_DEFAULT, NULL);
-	mutex_init(&arc_lowmem_lock, NULL, MUTEX_DEFAULT, NULL);
 
 	/* Convert seconds to clock ticks */
 	arc_min_prefetch_lifespan = 1 * hz;
@@ -4193,11 +4146,6 @@ arc_init(void)
 	(void) thread_create(NULL, 0, arc_reclaim_thread, NULL, 0, &p0,
 	    TS_RUN, minclsyspri);
 
-#ifdef _KERNEL
-	arc_event_lowmem = EVENTHANDLER_REGISTER(vm_lowmem, arc_lowmem, NULL,
-	    EVENTHANDLER_PRI_FIRST);
-#endif
-
 	arc_dead = FALSE;
 	arc_warm = B_FALSE;
 
@@ -4296,12 +4244,6 @@ arc_fini(void)
 	buf_fini();
 
 	ASSERT(arc_loaned_bytes == 0);
-
-	mutex_destroy(&arc_lowmem_lock);
-#ifdef _KERNEL
-	if (arc_event_lowmem != NULL)
-		EVENTHANDLER_DEREGISTER(vm_lowmem, arc_event_lowmem);
-#endif
 }
 
 /*
