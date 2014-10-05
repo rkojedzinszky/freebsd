@@ -2614,9 +2614,6 @@ arc_reclaim_needed(void)
 	    (btop(vmem_size(heap_arena, VMEM_FREE | VMEM_ALLOC)) >> 2))
 		return (1);
 #endif
-#else	/* !sun */
-	if (kmem_used() > (kmem_size() * 3) / 4)
-		return (1);
 #endif	/* sun */
 
 #else
