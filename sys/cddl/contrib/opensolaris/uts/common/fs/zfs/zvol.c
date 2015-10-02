@@ -572,6 +572,12 @@ zvol_create_minor(const char *name)
 		return (error);
 	}
 
+	if (dmu_objset_is_snapshot(os)) {
+		dmu_objset_disown(os, FTAG);
+		mutex_exit(&spa_namespace_lock);
+		return (0);
+	}
+
 #ifdef sun
 	if ((minor = zfsdev_minor_alloc()) == 0) {
 		dmu_objset_disown(os, FTAG);
@@ -662,7 +668,7 @@ zvol_create_minor(const char *name)
 	(void) strlcpy(zv->zv_name, name, MAXPATHLEN);
 	zv->zv_min_bs = DEV_BSHIFT;
 	zv->zv_objset = os;
-	if (dmu_objset_is_snapshot(os) || !spa_writeable(dmu_objset_spa(os)))
+	if (!spa_writeable(dmu_objset_spa(os)))
 		zv->zv_flags |= ZVOL_RDONLY;
 	mutex_init(&zv->zv_znode.z_range_lock, NULL, MUTEX_DEFAULT, NULL);
 	avl_create(&zv->zv_znode.z_range_avl, zfs_range_compare,
@@ -2544,52 +2550,6 @@ zvol_geom_worker(void *arg)
 
 extern boolean_t dataset_name_hidden(const char *name);
 
-static int
-zvol_create_snapshots(objset_t *os, const char *name)
-{
-	uint64_t cookie, obj;
-	char *sname;
-	int error, len;
-
-	cookie = obj = 0;
-	sname = kmem_alloc(MAXPATHLEN, KM_SLEEP);
-
-#if 0
-	(void) dmu_objset_find(name, dmu_objset_prefetch, NULL,
-	    DS_FIND_SNAPSHOTS);
-#endif
-
-	for (;;) {
-		len = snprintf(sname, MAXPATHLEN, "%s@", name);
-		if (len >= MAXPATHLEN) {
-			dmu_objset_rele(os, FTAG);
-			error = ENAMETOOLONG;
-			break;
-		}
-
-		dsl_pool_config_enter(dmu_objset_pool(os), FTAG);
-		error = dmu_snapshot_list_next(os, MAXPATHLEN - len,
-		    sname + len, &obj, &cookie, NULL);
-		dsl_pool_config_exit(dmu_objset_pool(os), FTAG);
-		if (error != 0) {
-			if (error == ENOENT)
-				error = 0;
-			break;
-		}
-
-		if ((error = zvol_create_minor(sname)) != 0) {
-#if 0
-			printf("ZFS WARNING: Unable to create ZVOL %s (error=%d).\n",
-			    sname, error);
-#endif
-			break;
-		}
-	}
-
-	kmem_free(sname, MAXPATHLEN);
-	return (error);
-}
-
 int
 zvol_create_minors(const char *name)
 {
@@ -2612,14 +2572,6 @@ zvol_create_minors(const char *name)
 		dsl_dataset_long_hold(os->os_dsl_dataset, FTAG);
 		dsl_pool_rele(dmu_objset_pool(os), FTAG);
 		error = zvol_create_minor(name);
-		if (error == 0 || error == EEXIST) {
-			error = zvol_create_snapshots(os, name);
-		} else {
-#if 0
-			printf("ZFS WARNING: Unable to create ZVOL %s (error=%d).\n",
-			    name, error);
-#endif
-		}
 		dsl_dataset_long_rele(os->os_dsl_dataset, FTAG);
 		dsl_dataset_rele(os->os_dsl_dataset, FTAG);
 		return (error);
