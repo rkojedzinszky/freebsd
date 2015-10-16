@@ -401,6 +401,12 @@ SYSCTL_INT(_hw_igb, OID_AUTO, num_queues, CTLFLAG_RDTUN, &igb_num_queues, 0,
 */
 static int igb_last_bind_cpu = -1;
 
+/* How many packets txeof tries to clean at a time */
+static int igb_tx_process_limit = 128;
+TUNABLE_INT("hw.igb.tx_process_limit", &igb_tx_process_limit);
+SYSCTL_INT(_hw_igb, OID_AUTO, tx_process_limit, CTLFLAG_RDTUN,
+    &igb_tx_process_limit, 0,
+    "Maximum number of transmit packets to clean at a time, 0 means unlimited");
 /* How many packets rxeof tries to clean at a time */
 static int igb_rx_process_limit = 100;
 TUNABLE_INT("hw.igb.rx_process_limit", &igb_rx_process_limit);
@@ -527,6 +533,9 @@ igb_attach(device_t dev)
 	e1000_get_bus_info(&adapter->hw);
 
 	/* Sysctl for limiting the amount of work done in the taskqueue */
+	igb_set_sysctl_value(adapter, "tx_processing_limit",
+	    "max number of tx packets to clean",
+	    &adapter->tx_process_limit, igb_tx_process_limit);
 	igb_set_sysctl_value(adapter, "rx_processing_limit",
 	    "max number of rx packets to process",
 	    &adapter->rx_process_limit, igb_rx_process_limit);
@@ -3959,7 +3968,7 @@ igb_txeof(struct tx_ring *txr)
 	struct adapter		*adapter = txr->adapter;
 	struct ifnet		*ifp = adapter->ifp;
 	u32			work, processed = 0;
-	u16			limit = txr->process_limit;
+	u16			limit = adapter->tx_process_limit;
 	struct igb_tx_buf	*buf;
 	union e1000_adv_tx_desc *txd;
 
