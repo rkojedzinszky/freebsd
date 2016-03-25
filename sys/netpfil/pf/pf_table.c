@@ -1746,7 +1746,8 @@ pfr_setflags_ktable(struct pfr_ktable *kt, int newf)
 	PF_RULES_WASSERT();
 
 	if (!(newf & PFR_TFLAG_REFERENCED) &&
-	    !(newf & PFR_TFLAG_PERSIST))
+	    !(newf & PFR_TFLAG_PERSIST) &&
+	    !(newf & PFR_TFLAG_REFDANCHOR))
 		newf &= ~PFR_TFLAG_ACTIVE;
 	if (!(newf & PFR_TFLAG_ACTIVE))
 		newf &= ~PFR_TFLAG_USRMASK;
