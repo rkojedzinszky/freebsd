@@ -613,6 +613,12 @@ zvol_create_minor(const char *name)
 		return (error);
 	}
 
+	if (dmu_objset_is_snapshot(os)) {
+		dmu_objset_disown(os, FTAG);
+		mutex_exit(&zfsdev_state_lock);
+		return (0);
+	}
+
 #ifdef illumos
 	if ((minor = zfsdev_minor_alloc()) == 0) {
 		dmu_objset_disown(os, FTAG);
@@ -2806,51 +2812,6 @@ zvol_geom_worker(void *arg)
 
 extern boolean_t dataset_name_hidden(const char *name);
 
-static int
-zvol_create_snapshots(objset_t *os, const char *name)
-{
-	uint64_t cookie, obj;
-	char *sname;
-	int error, len;
-
-	cookie = obj = 0;
-	sname = kmem_alloc(MAXPATHLEN, KM_SLEEP);
-
-#if 0
-	(void) dmu_objset_find(name, dmu_objset_prefetch, NULL,
-	    DS_FIND_SNAPSHOTS);
-#endif
-
-	for (;;) {
-		len = snprintf(sname, MAXPATHLEN, "%s@", name);
-		if (len >= MAXPATHLEN) {
-			dmu_objset_rele(os, FTAG);
-			error = ENAMETOOLONG;
-			break;
-		}
-
-		dsl_pool_config_enter(dmu_objset_pool(os), FTAG);
-		error = dmu_snapshot_list_next(os, MAXPATHLEN - len,
-		    sname + len, &obj, &cookie, NULL);
-		dsl_pool_config_exit(dmu_objset_pool(os), FTAG);
-		if (error != 0) {
-			if (error == ENOENT)
-				error = 0;
-			break;
-		}
-
-		error = zvol_create_minor(sname);
-		if (error != 0 && error != EEXIST && error != ENAMETOOLONG) {
-			printf("ZFS WARNING: Unable to create ZVOL %s (error=%d).\n",
-			    sname, error);
-			break;
-		}
-	}
-
-	kmem_free(sname, MAXPATHLEN);
-	return (error);
-}
-
 int
 zvol_create_minors(const char *name)
 {
@@ -2872,7 +2833,7 @@ zvol_create_minors(const char *name)
 		dsl_pool_rele(dmu_objset_pool(os), FTAG);
 		error = zvol_create_minor(name);
 		if (error == 0 || error == EEXIST || error == ENAMETOOLONG) {
-			error = zvol_create_snapshots(os, name);
+			//error = zvol_create_snapshots(os, name);
 		} else {
 			printf("ZFS WARNING: Unable to create ZVOL %s (error=%d).\n",
 			    name, error);

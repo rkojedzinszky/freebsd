@@ -2131,7 +2131,6 @@ dsl_dataset_rename_snapshot_sync_impl(dsl_pool_t *dp,
 	snprintf(newname, MAXPATHLEN, "%s@%s", ddrsa->ddrsa_fsname,
 	    ddrsa->ddrsa_newsnapname);
 	zfsvfs_update_fromname(oldname, newname);
-	zvol_rename_minors(oldname, newname);
 	dsl_event_notify_rename(dsl_dataset_get_spa(ds), oldname, newname, ESC_ZFS_DATASET_RENAME);
 	kmem_free(newname, MAXPATHLEN);
 	kmem_free(oldname, MAXPATHLEN);
