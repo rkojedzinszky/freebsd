@@ -3,8 +3,7 @@
 #
 
 # Temporary include path hack - to be removed once I clean lib9p.h up
-CFLAGS+=-I${.CURDIR}/../../contrib/lib9p -I${.CURDIR}/../../sys
-.PATH:  ${.CURDIR}/../../contrib/lib9p
+CFLAGS+=-I${.CURDIR}/../../sys
 .PATH:  ${.CURDIR}/../../sys/cam/ctl
 
 PROG=	bhyve
@@ -43,7 +42,6 @@ SRCS=	\
 	pci_irq.c		\
 	pci_lpc.c		\
 	pci_passthru.c		\
-	pci_virtio_9p.c		\
 	pci_virtio_block.c	\
 	pci_virtio_console.c	\
 	pci_virtio_net.c	\
@@ -75,7 +73,7 @@ SRCS+=	vmm_instruction_emul.c
 
 DPADD=	${LIBVMMAPI} ${LIBMD} ${LIBZ} ${LIBUTIL} ${LIB9P} ${LIBSBUF}
 DPADD+=	${LIBVNCSERVER} ${LIBCAM}
-LDADD=	-lvmmapi -lmd -lpthread -lz -lutil -l9p -lsbuf -lvncserver -lcam
+LDADD=	-lvmmapi -lmd -lpthread -lz -lutil -lsbuf -lvncserver -lcam
 
 CFLAGS+= -I${BHYVE_SYSDIR}/sys/dev/e1000
 CFLAGS+= -I${BHYVE_SYSDIR}/sys/dev/mii
